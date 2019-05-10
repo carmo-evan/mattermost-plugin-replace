@@ -1,15 +1,20 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 
+	"github.com/blang/semver"
 	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
 
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/mattermost/mattermost-server/plugin"
 )
+
+const minServerVersion = "5.10.0" // dependent on method SearchPostsInTeam
 
 type Plugin struct {
 	plugin.MattermostPlugin
@@ -33,8 +38,26 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 	p.router.ServeHTTP(w, r)
 }
 
+// checkServerVersion checks Mattermost Server has at least the required version
+func (p *Plugin) checkServerVersion() error {
+	serverVersion, err := semver.Parse(p.API.GetServerVersion())
+	if err != nil {
+		return errors.Wrap(err, "failed to parse server version")
+	}
+
+	r := semver.MustParseRange(">=" + minServerVersion)
+	if !r(serverVersion) {
+		return fmt.Errorf("this plugin requires Mattermost v%s or later", minServerVersion)
+	}
+
+	return nil
+}
+
 //OnActivate registers the /s command with the API
 func (p *Plugin) OnActivate() error {
+	if err := p.checkServerVersion(); err != nil {
+		return err
+	}
 	return p.API.RegisterCommand(&model.Command{
 		Trigger:          "s",
 		AutoComplete:     true,
@@ -42,26 +65,34 @@ func (p *Plugin) OnActivate() error {
 	})
 }
 
+func splitAndValidateInput(command string) ([]string, error) {
+
+	input := strings.TrimSpace(strings.TrimPrefix(command, "/s"))
+
+	if input == "" {
+		return nil, errors.New("No input")
+	}
+
+	strs := strings.Split(input, "/")
+
+	if len(strs) < 2 || len(strs[0]) < 1 || len(strs[1]) < 1 {
+		return nil, errors.New("Bad user input")
+	}
+
+	return strs, nil
+}
+
 //ExecuteCommand parses the input,
 func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
 
 	//Validate input
 
-	input := strings.TrimSpace(strings.TrimPrefix(args.Command, "/s"))
+	oldAndNew, err := splitAndValidateInput(args.Command)
 
-	if input == "" {
+	if err != nil {
 		return &model.CommandResponse{
 			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
-			Text:         `Usage: s/ {text to be replaced}/{new text}`,
-		}, nil
-	}
-
-	oldAndNew := strings.Split(input, "/")
-
-	if len(oldAndNew) < 2 {
-		return &model.CommandResponse{
-			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
-			Text:         `Usage: s/ {text to be replaced}/{new text}`,
+			Text:         `Usage: /s {text to be replaced}/{new text}`,
 		}, nil
 	}
 
@@ -70,28 +101,40 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 	new := oldAndNew[1]
 
 	//Get username
-	user, err := p.API.GetUser(args.UserId)
+	user, appErr := p.API.GetUser(args.UserId)
 	if err != nil {
-		return nil, err
+		return nil, appErr
 	}
 
 	//Find last post
 
 	searchParams := model.ParseSearchParams("from:"+user.Username, 0)
 
-	posts, err := p.API.SearchPostsInTeam(args.TeamId, searchParams)
-	if err != nil {
-		return nil, err
+	posts, appErr := p.API.SearchPostsInTeam(args.TeamId, searchParams)
+
+	if appErr != nil {
+		return nil, appErr
+	}
+
+	if len(posts) < 1 {
+		return &model.CommandResponse{
+			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
+			Text:         `No previous post to be replaced.`,
+		}, nil
 	}
 
 	lastPost := posts[0]
 
 	lastPost.Message = strings.ReplaceAll(lastPost.Message, old, new)
 
-	p.API.UpdatePost(lastPost)
+	_, appErr = p.API.UpdatePost(lastPost)
+
+	if appErr != nil {
+		return nil, appErr
+	}
 
 	return &model.CommandResponse{
 		ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
-		Text:         "Replaced " + old + " for " + new,
+		Text:         `Replaced "` + old + `" for "` + new + `"`,
 	}, nil
 }
