@@ -15,6 +15,7 @@ import (
 )
 
 const minServerVersion = "5.10.0" // dependent on method SearchPostsInTeam
+const usage = `Usage: s/{text to be replaced}/{new text}`
 
 type Plugin struct {
 	plugin.MattermostPlugin
@@ -55,19 +56,12 @@ func (p *Plugin) checkServerVersion() error {
 
 //OnActivate registers the /s command with the API
 func (p *Plugin) OnActivate() error {
-	if err := p.checkServerVersion(); err != nil {
-		return err
-	}
-	return p.API.RegisterCommand(&model.Command{
-		Trigger:          "s",
-		AutoComplete:     true,
-		AutoCompleteDesc: "Finds and replaces text in your last post.",
-	})
+	return p.checkServerVersion()
 }
 
-func splitAndValidateInput(command string) ([]string, error) {
+func splitAndValidateInput(message string) ([]string, error) {
 
-	input := strings.TrimSpace(strings.TrimPrefix(command, "/s"))
+	input := strings.TrimSpace(strings.TrimPrefix(message, "s/"))
 
 	if input == "" {
 		return nil, errors.New("No input")
@@ -82,45 +76,51 @@ func splitAndValidateInput(command string) ([]string, error) {
 	return strs, nil
 }
 
-//ExecuteCommand parses the input,
-func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*model.CommandResponse, *model.AppError) {
+// MessageWillBePosted parses every post. If our s/ command is present, it replaces the last post.
+func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*model.Post, string) {
+
+	//notification that will be sent as an ephemeral post
+	notification := &model.Post{ChannelId: post.ChannelId, CreateAt: model.GetMillis()}
 
 	//Validate input
+	oldAndNew, err := splitAndValidateInput(post.Message)
 
-	oldAndNew, err := splitAndValidateInput(args.Command)
-
+	//if no valid input, just publish post normally
 	if err != nil {
-		return &model.CommandResponse{
-			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
-			Text:         `Usage: /s {text to be replaced}/{new text}`,
-		}, nil
+		return nil, ""
 	}
 
 	old := oldAndNew[0]
 
 	new := oldAndNew[1]
 
-	//Get username
-	user, appErr := p.API.GetUser(args.UserId)
-	if err != nil {
-		return nil, appErr
-	}
-
-	//Find last post
-
-	searchParams := model.ParseSearchParams("from:"+user.Username, 0)
-
-	posts, appErr := p.API.SearchPostsInTeam(args.TeamId, searchParams)
+	//Get user data
+	user, appErr := p.API.GetUser(post.UserId)
 
 	if appErr != nil {
-		return nil, appErr
+		return nil, ""
+	}
+
+	//Find channel to get access to teamId
+	ch, appErr := p.API.GetChannel(post.ChannelId)
+
+	if appErr != nil {
+		return nil, ""
+	}
+
+	// find posts by user name
+	searchParams := model.ParseSearchParams("from:"+user.Username, 0)
+
+	posts, appErr := p.API.SearchPostsInTeam(ch.TeamId, searchParams)
+
+	if appErr != nil {
+		return nil, ""
 	}
 
 	if len(posts) < 1 {
-		return &model.CommandResponse{
-			ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
-			Text:         `No previous post to be replaced.`,
-		}, nil
+		notification.Message = `s/ Command: No previous post to be replaced.`
+		p.API.SendEphemeralPost(user.Id, notification)
+		return nil, ""
 	}
 
 	lastPost := posts[0]
@@ -130,11 +130,11 @@ func (p *Plugin) ExecuteCommand(c *plugin.Context, args *model.CommandArgs) (*mo
 	_, appErr = p.API.UpdatePost(lastPost)
 
 	if appErr != nil {
-		return nil, appErr
+		return nil, ""
 	}
 
-	return &model.CommandResponse{
-		ResponseType: model.COMMAND_RESPONSE_TYPE_EPHEMERAL,
-		Text:         `Replaced "` + old + `" for "` + new + `"`,
-	}, nil
+	notification.Message = `s/ Replaced "` + old + `" for "` + new + `"`
+	p.API.SendEphemeralPost(user.Id, notification)
+
+	return nil, "plugin.message_will_be_posted.dismiss_post"
 }

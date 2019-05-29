@@ -5,8 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	// "github.com/blang/semver"
-
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/mattermost/mattermost-server/plugin"
 	"github.com/mattermost/mattermost-server/plugin/plugintest"
@@ -31,9 +29,10 @@ type testCase struct {
 }
 
 type testAPIConfig struct {
-	User  *model.User
-	Posts []*model.Post
-	Post  *model.Post
+	User    *model.User
+	Posts   []*model.Post
+	Post    *model.Post
+	Channel *model.Channel
 }
 
 func setupAPI(api *plugintest.API, config *testAPIConfig) {
@@ -42,31 +41,33 @@ func setupAPI(api *plugintest.API, config *testAPIConfig) {
 
 	api.On("GetUser", mock.Anything).Return(config.User, nil)
 
+	api.On("GetChannel", mock.Anything).Return(config.Channel, nil)
+
 	api.On("SearchPostsInTeam", mock.Anything, mock.Anything).Return(config.Posts, nil)
+
+	api.On("SendEphemeralPost", mock.Anything, mock.Anything).Return(nil)
 
 	api.On("UpdatePost", mock.Anything).Return(config.Post, nil)
 
-	api.On("RegisterCommand", mock.Anything).Return(nil)
 }
 
-//TestExecuteCommand mocks the API calls (by using the private method setupAPI) and validates
-//the inputs given,
+// TestExecuteCommand mocks the API calls (by using the private method setupAPI) and validates the inputs given
 func TestExecuteCommand(t *testing.T) {
 
 	cases := []testCase{
-		{"message to bee replaced", "/s bee/be", `Replaced "bee" for "be"`, false},
-		{"baaad input", "/s bad", "Usage: /s {text to be replaced}/{new text}", true},
-		{"more baaad input", "/s baaad/", "Usage: /s {text to be replaced}/{new text}", true},
+		{"message to bee replaced", "s/bee/be", `Replaced "bee" for "be"`, false},
+		{"baaad input", "s/bad", usage, true},
+		{"more baaad input", "s/baaad/", usage, true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.command, func(t *testing.T) {
 
 			c := &plugin.Context{}
-			args := &model.CommandArgs{
-				UserId:  "testUserId",
-				Command: tc.command,
-				TeamId:  "testTeamId",
+			post := &model.Post{
+				UserId:    "testUserId",
+				Message:   tc.command,
+				ChannelId: "testChannelId",
 			}
 
 			api := &plugintest.API{}
@@ -74,9 +75,10 @@ func TestExecuteCommand(t *testing.T) {
 			defer api.AssertExpectations(t)
 
 			config := &testAPIConfig{
-				User:  &model.User{},
-				Posts: []*model.Post{&model.Post{}},
-				Post:  &model.Post{},
+				User:    &model.User{},
+				Posts:   []*model.Post{&model.Post{}},
+				Post:    &model.Post{},
+				Channel: &model.Channel{},
 			}
 
 			//needs to test input before setting API expectations
@@ -91,10 +93,9 @@ func TestExecuteCommand(t *testing.T) {
 
 			p.OnActivate()
 
-			cr, err := p.ExecuteCommand(c, args)
-
-			assert.Nil(t, err)
-			assert.Equal(t, tc.expectedResponse, cr.Text)
+			returnedPost, err := p.MessageWillBePosted(c, post)
+			assert.Nil(t, returnedPost)
+			assert.Equal(t, err, "plugin.message_will_be_posted.dismiss_post")
 		})
 	}
 }
@@ -106,12 +107,6 @@ func TestPluginOnActivate(t *testing.T) {
 	api.On("GetServerVersion").Return(minServerVersion)
 
 	defer api.AssertExpectations(t)
-
-	api.On("RegisterCommand", &model.Command{
-		Trigger:          "s",
-		AutoComplete:     true,
-		AutoCompleteDesc: "Finds and replaces text in your last post.",
-	}).Return(nil)
 
 	p := setupTestPlugin(t, api)
 

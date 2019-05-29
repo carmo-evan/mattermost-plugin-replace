@@ -1,6 +1,6 @@
 # Replace Plugin
 
-"This plugin adds the /s command to find and replace a string in the user's last post
+This plugin adds the s/ command to find and replace a string in the user's last post
 
 To learn more about plugins, see [our plugin documentation](https://developers.mattermost.com/extend/plugins/).
 
