@@ -24,6 +24,7 @@ func setupTestPlugin(t *testing.T, api *plugintest.API) *Plugin {
 type testCase struct {
 	message          string
 	command          string
+	rootId           string
 	expectedResponse string
 	shouldFail       bool
 }
@@ -55,9 +56,10 @@ func setupAPI(api *plugintest.API, config *testAPIConfig) {
 func TestExecuteCommand(t *testing.T) {
 
 	cases := []testCase{
-		{"message to bee replaced", "s/bee/be", `Replaced "bee" for "be"`, false},
-		{"baaad input", "s/bad", usage, true},
-		{"more baaad input", "s/baaad/", usage, true},
+		{"message to bee replaced", "s/bee/be", "", `Replaced "bee" for "be"`, false},
+		{"message to bee replaced", "s/bee/be", "123", `Replaced "bee" for "be"`, false},
+		{"baaad input", "s/bad", "", usage, true},
+		{"more baaad input", "s/baaad/", "", usage, true},
 	}
 
 	for _, tc := range cases {
