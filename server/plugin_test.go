@@ -22,11 +22,11 @@ func setupTestPlugin(t *testing.T, api *plugintest.API) *Plugin {
 }
 
 type testCase struct {
-	message          string
-	command          string
-	rootId           string
-	expectedResponse string
-	shouldFail       bool
+	message         string
+	command         string
+	rootId          string
+	expectedMessage string
+	shouldFail      bool
 }
 
 type testAPIConfig struct {
@@ -56,8 +56,9 @@ func setupAPI(api *plugintest.API, config *testAPIConfig) {
 func TestExecuteCommand(t *testing.T) {
 
 	cases := []testCase{
-		{"message to bee replaced", "s/bee/be", "", `Replaced "bee" for "be"`, false},
-		{"message to bee replaced", "s/bee/be", "123", `Replaced "bee" for "be"`, false},
+		{"message to bee replaced", "s/bee/be", "", `message to be replaced`, false},
+		{"message to bee replaced", "s/bee/be", "123", `message to be replaced`, false},
+		{"what if I typ the word typical", "s/typ/type", "", `what if I type the word typical`, true},
 		{"baaad input", "s/bad", "", usage, true},
 		{"more baaad input", "s/baaad/", "", usage, true},
 	}
@@ -98,6 +99,14 @@ func TestExecuteCommand(t *testing.T) {
 			returnedPost, err := p.MessageWillBePosted(c, post)
 			assert.Nil(t, returnedPost)
 			assert.Equal(t, err, "plugin.message_will_be_posted.dismiss_post")
+		})
+		t.Run(tc.command+" - Replace", func(t *testing.T) {
+			oldAndNew, err := splitAndValidateInput(tc.command)
+			if err != nil && tc.shouldFail {
+				assert.NotNil(t, err)
+				return
+			}
+			assert.Equal(t, tc.expectedMessage, replace(tc.message, oldAndNew[0], oldAndNew[1]))
 		})
 	}
 }
