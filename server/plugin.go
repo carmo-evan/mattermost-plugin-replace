@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -120,6 +121,11 @@ func (p *Plugin) getLastPost(user *model.User, teamId string, rootId string) (*m
 	return posts[0], ""
 }
 
+func replace(str, old, new string) string {
+	re := regexp.MustCompile(`\b(` + old + `)\b`)
+	return re.ReplaceAllString(str, new)
+}
+
 // MessageWillBePosted parses every post. If our s/ command is present, it replaces the last post.
 func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*model.Post, string) {
 
@@ -160,7 +166,7 @@ func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*mode
 		return nil, ""
 	}
 
-	lastPost.Message = strings.ReplaceAll(lastPost.Message, old, new)
+	lastPost.Message = replace(lastPost.Message, old, new)
 
 	_, appErr = p.API.UpdatePost(lastPost)
 
