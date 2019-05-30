@@ -14,8 +14,11 @@ import (
 	"github.com/mattermost/mattermost-server/plugin"
 )
 
-const minServerVersion = "5.10.0" // dependent on method SearchPostsInTeam
-const usage = `Usage: s/{text to be replaced}/{new text}`
+const (
+	minServerVersion  string = "5.10.0" // dependent on method SearchPostsInTeam
+	usage             string = `Usage: s/{text to be replaced}/{new text}`
+	noPostsFoundError string = "`s/ Command: No previous post to be replaced.`"
+)
 
 type Plugin struct {
 	plugin.MattermostPlugin
@@ -76,6 +79,47 @@ func splitAndValidateInput(message string) ([]string, error) {
 	return strs, nil
 }
 
+func (p *Plugin) getLastPost(user *model.User, teamId string, rootId string) (*model.Post, string) {
+	// if we have a rootId, it means we are in a thread.
+	if rootId != "" {
+		postThread, err := p.API.GetPostThread(rootId)
+		if err != nil {
+			return nil, err.Error()
+		}
+
+		//HACK: adding Orders to the postThread to be able to sort it
+		// because API.GetPostThread returns a postList without the Orders
+		for _, post := range postThread.Posts {
+			postThread.AddOrder(post.Id)
+		}
+
+		postThread.SortByCreateAt()
+
+		for _, key := range postThread.Order {
+			post := postThread.Posts[key]
+			if post.UserId == user.Id {
+				return post, ""
+			}
+		}
+
+		return nil, noPostsFoundError
+	}
+
+	searchParams := model.ParseSearchParams("from:"+user.Username, 0)
+
+	posts, err := p.API.SearchPostsInTeam(teamId, searchParams)
+
+	if err != nil {
+		return nil, err.Error()
+	}
+
+	if len(posts) < 1 {
+		return nil, noPostsFoundError
+	}
+
+	return posts[0], ""
+}
+
 // MessageWillBePosted parses every post. If our s/ command is present, it replaces the last post.
 func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*model.Post, string) {
 
@@ -109,21 +153,12 @@ func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*mode
 	}
 
 	// find posts by user name
-	searchParams := model.ParseSearchParams("from:"+user.Username, 0)
-
-	posts, appErr := p.API.SearchPostsInTeam(ch.TeamId, searchParams)
-
-	if appErr != nil {
-		return nil, ""
-	}
-
-	if len(posts) < 1 {
-		notification.Message = `s/ Command: No previous post to be replaced.`
+	lastPost, errId := p.getLastPost(user, ch.TeamId, post.RootId)
+	if errId != "" {
+		notification.Message = errId
 		p.API.SendEphemeralPost(user.Id, notification)
 		return nil, ""
 	}
-
-	lastPost := posts[0]
 
 	lastPost.Message = strings.ReplaceAll(lastPost.Message, old, new)
 
