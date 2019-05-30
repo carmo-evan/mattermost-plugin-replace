@@ -10,4 +10,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## 0.2.0 - 2019-05-29
 ### Added
-- Changed usage from `/s/old/new` to `s/old/new`
+- Changed usage from `/s/old/new` to `s/old/new`.
+- Added support for message threads.
+### Fixed
+- Fixed bug where parts of words were being replaced.
