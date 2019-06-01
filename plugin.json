@@ -2,7 +2,7 @@
     "id": "com.mattermost.replace",
     "name": "Replace",
     "description": "This plugin adds the s/ command to find and replace a string in the user's last post",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "server": {
         "executables": {
             "linux-amd64": "server/dist/plugin-linux-amd64",
