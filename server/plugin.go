@@ -81,7 +81,8 @@ func splitAndValidateInput(message string) ([]string, error) {
 }
 
 func (p *Plugin) getLastPost(user *model.User, teamId string, rootId string) (*model.Post, string) {
-	// if we have a rootId, it means we are in a thread.
+
+	// if we have a rootId, it means we are in a chat thread.
 	if rootId != "" {
 		postThread, err := p.API.GetPostThread(rootId)
 		if err != nil {
@@ -130,8 +131,7 @@ func replace(str, old, new string) string {
 func (p *Plugin) MessageWillBePosted(c *plugin.Context, post *model.Post) (*model.Post, string) {
 
 	//notification that will be sent as an ephemeral post
-	notification := &model.Post{ChannelId: post.ChannelId, CreateAt: model.GetMillis()}
-
+	notification := &model.Post{ChannelId: post.ChannelId, CreateAt: model.GetMillis(), RootId: post.RootId}
 	//Validate input
 	oldAndNew, err := splitAndValidateInput(post.Message)
 
